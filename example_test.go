@@ -3,7 +3,7 @@ package raft_test
 import (
 	"bytes"
 	"fmt"
-	"github.com/peterbourgon/raft"
+	"github.com/VictorLowther/raft"
 	"net/http"
 	"net/url"
 )
