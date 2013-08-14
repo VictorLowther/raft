@@ -49,7 +49,7 @@ func (c *configuration) directSet(pm peerMap) error {
 	return nil
 }
 
-func (c *configuration) get(id uint64) (Peer, bool) {
+func (c *configuration) get(id string) (Peer, bool) {
 	c.RLock()
 	defer c.RUnlock()
 
@@ -88,7 +88,7 @@ func (c *configuration) allPeers() peerMap {
 // pass returns true if the votes represented by the votes map are sufficient
 // to constitute a quorum. pass respects C_old,new requirements, which dictate
 // that any request must receive a majority from both C_old and C_new to pass.
-func (c *configuration) pass(votes map[uint64]bool) bool {
+func (c *configuration) pass(votes map[string]bool) bool {
 	c.RLock()
 	defer c.RUnlock()
 

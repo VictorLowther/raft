@@ -10,6 +10,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"strconv"
 )
 
 func Test3ServersOverHTTP(t *testing.T) {
@@ -43,7 +44,7 @@ func testNServersOverHTTP(t *testing.T, n int) {
 		stateMachines[i] = &protectedSlice{}
 
 		// create a Raft protocol server
-		raftServers[i] = NewServer(uint64(i+1), &bytes.Buffer{}, appender(stateMachines[i]))
+		raftServers[i] = NewServer(strconv.Itoa(i), &bytes.Buffer{}, appender(stateMachines[i]))
 
 		// expose that server with a HTTP transport
 		mux := http.NewServeMux()
@@ -57,7 +58,7 @@ func testNServersOverHTTP(t *testing.T, n int) {
 
 		// we have to start the HTTP server, so the NewHTTPPeer ID check works
 		// (it can work without starting the actual Raft protocol server)
-		t.Logf("Server id=%d @ %s", raftServers[i].id, httpServers[i].URL)
+		t.Logf("Server id=%s @ %s", raftServers[i].id, httpServers[i].URL)
 	}
 
 	// build the common set of peers in the network

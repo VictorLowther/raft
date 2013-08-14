@@ -10,7 +10,6 @@ import (
 	"log"
 	"net/http"
 	"net/url"
-	"strconv"
 )
 
 var (
@@ -159,7 +158,7 @@ type commaError struct {
 // HTTPPeer represents a remote Raft server in the local process space. The
 // remote server is expected to be accessible through an HTTPTransport.
 type httpPeer struct {
-	remoteID uint64
+	remoteID string
 	url      *url.URL
 }
 
@@ -177,26 +176,23 @@ func NewHTTPPeer(url *url.URL) (Peer, error) {
 	}
 	defer resp.Body.Close()
 
-	buf, err := ioutil.ReadAll(resp.Body)
+	id, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
 		return nil, err
 	}
-	id, err := strconv.ParseUint(string(buf), 10, 64)
-	if err != nil {
-		return nil, err
-	}
-	if id <= 0 {
-		return nil, fmt.Errorf("invalid peer ID %d", id)
+
+	if len(id) == 0 {
+		return nil, fmt.Errorf("invalid peer ID %v", id)
 	}
 
 	return &httpPeer{
-		remoteID: id,
+		remoteID: string(id),
 		url:      url,
 	}, nil
 }
 
 // ID returns the Raft-domain ID retrieved during construction of the httpPeer.
-func (p *httpPeer) id() uint64 { return p.remoteID }
+func (p *httpPeer) id() string { return p.remoteID }
 
 // AppendEntries triggers a AppendEntries RPC to the remote server, and
 // returns the response. Errors at the transport layers are logged, and

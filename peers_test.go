@@ -2,6 +2,7 @@ package raft
 
 import (
 	"testing"
+	"strconv"
 )
 
 func TestQuorum(t *testing.T) {
@@ -24,7 +25,8 @@ func TestQuorum(t *testing.T) {
 	} {
 		pm := peerMap{}
 		for i := 0; i < tuple.n; i++ {
-			pm[uint64(i+1)] = nonresponsivePeer(i + 1)
+			n := strconv.Itoa(i)
+			pm[n] = nonresponsivePeer(n)
 		}
 		if expected, got := tuple.expected, pm.quorum(); expected != got {
 			t.Errorf("Quorum of %d: expected %d, got %d", tuple.n, expected, got)

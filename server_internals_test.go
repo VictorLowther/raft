@@ -11,17 +11,17 @@ import (
 func TestFollowerAllegiance(t *testing.T) {
 	// a follower with allegiance to leader=2
 	s := Server{
-		id:     1,
+		id:     "foo",
 		term:   5,
 		state:  &protectedString{value: follower},
-		leader: 2,
+		leader: "bar",
 		log:    newRaftLog(&bytes.Buffer{}, noop),
 	}
 
 	// receives an appendEntries from a future term and different leader
 	_, stepDown := s.handleAppendEntries(appendEntries{
 		Term:     6,
-		LeaderID: 3,
+		LeaderID: "baz",
 	})
 
 	// should now step down and have a new term
@@ -36,17 +36,17 @@ func TestFollowerAllegiance(t *testing.T) {
 func TestStrongLeader(t *testing.T) {
 	// a leader in term=2
 	s := Server{
-		id:     1,
+		id:     "foo",
 		term:   2,
 		state:  &protectedString{value: leader},
-		leader: 1,
+		leader: "foo",
 		log:    newRaftLog(&bytes.Buffer{}, noop),
 	}
 
 	// receives a requestVote from someone also in term=2
 	resp, stepDown := s.handleRequestVote(requestVote{
 		Term:         2,
-		CandidateID:  3,
+		CandidateID:  "baz",
 		LastLogIndex: 0,
 		LastLogTerm:  0,
 	})
@@ -87,9 +87,9 @@ func TestLenientCommit(t *testing.T) {
 
 	// belongs to a follower
 	s := Server{
-		id:     100,
+		id:     "centifoo",
 		term:   2,
-		leader: 101,
+		leader: "centibar",
 		log:    log,
 		state:  &protectedString{value: follower},
 	}
@@ -97,7 +97,7 @@ func TestLenientCommit(t *testing.T) {
 	// an appendEntries comes with correct PrevLogIndex but older CommitIndex
 	resp, stepDown := s.handleAppendEntries(appendEntries{
 		Term:         2,
-		LeaderID:     101,
+		LeaderID:     "centibar",
 		PrevLogIndex: 5,
 		PrevLogTerm:  2,
 		CommitIndex:  4, // i.e. commitPos=3
@@ -115,9 +115,9 @@ func TestLenientCommit(t *testing.T) {
 func TestConfigurationReceipt(t *testing.T) {
 	// a follower
 	s := Server{
-		id:     2,
+		id:     "bar",
 		term:   1,
-		leader: 1,
+		leader: "foo",
 		log: &raftLog{
 			entries:   []logEntry{logEntry{Index: 1, Term: 1}},
 			commitPos: 0,
@@ -128,9 +128,9 @@ func TestConfigurationReceipt(t *testing.T) {
 
 	// receives a configuration change
 	pm := makePeerMap(
-		serializablePeer{1, "foo"},
-		serializablePeer{2, "bar"},
-		serializablePeer{3, "baz"},
+		serializablePeer{"foo", "foo"},
+		serializablePeer{"bar", "bar"},
+		serializablePeer{"baz", "baz"},
 	)
 	configurationBuf := &bytes.Buffer{}
 	gob.Register(&serializablePeer{})
@@ -141,7 +141,7 @@ func TestConfigurationReceipt(t *testing.T) {
 	// via an appendEntries
 	aer, _ := s.handleAppendEntries(appendEntries{
 		Term:         1,
-		LeaderID:     1,
+		LeaderID:     "foo",
 		PrevLogIndex: 1,
 		PrevLogTerm:  1,
 		Entries: []logEntry{
@@ -164,21 +164,21 @@ func TestConfigurationReceipt(t *testing.T) {
 	if expected, got := 3, s.config.allPeers().count(); expected != got {
 		t.Fatalf("follower peer count: expected %d, got %d", expected, got)
 	}
-	peer, ok := s.config.get(3)
+	peer, ok := s.config.get("baz")
 	if !ok {
-		t.Fatal("follower didn't get peer 3")
+		t.Fatalf("follower didn't get peer baz, got %s instead",peer.id())
 	}
-	if peer.id() != 3 {
-		t.Fatal("follower got bad peer 3")
+	if peer.id() != "baz" {
+		t.Fatal("follower got bad peer %s instead of baz",peer.id())
 	}
 }
 
 func TestNonLeaderExpulsion(t *testing.T) {
 	// a follower
 	s := Server{
-		id:     2,
+		id:     "bar",
 		term:   1,
-		leader: 1,
+		leader: "foo",
 		log: &raftLog{
 			store:     &bytes.Buffer{},
 			entries:   []logEntry{logEntry{Index: 1, Term: 1}},
@@ -191,9 +191,9 @@ func TestNonLeaderExpulsion(t *testing.T) {
 
 	// receives a configuration change that doesn't include itself
 	pm := makePeerMap(
-		serializablePeer{1, "foo"},
-		serializablePeer{3, "baz"},
-		serializablePeer{5, "bat"},
+		serializablePeer{"foo", "foo"},
+		serializablePeer{"baz", "baz"},
+		serializablePeer{"quux", "bat"},
 	)
 	configurationBuf := &bytes.Buffer{}
 	gob.Register(&serializablePeer{})
@@ -204,7 +204,7 @@ func TestNonLeaderExpulsion(t *testing.T) {
 	// via an appendEntries
 	s.handleAppendEntries(appendEntries{
 		Term:         1,
-		LeaderID:     1,
+		LeaderID:     "foo",
 		PrevLogIndex: 1,
 		PrevLogTerm:  1,
 		Entries: []logEntry{
@@ -221,7 +221,7 @@ func TestNonLeaderExpulsion(t *testing.T) {
 	// and once committed
 	s.handleAppendEntries(appendEntries{
 		Term:         1,
-		LeaderID:     1,
+		LeaderID:     "foo",
 		PrevLogIndex: 2,
 		PrevLogTerm:  1,
 		CommitIndex:  2,
@@ -237,11 +237,11 @@ func TestNonLeaderExpulsion(t *testing.T) {
 }
 
 type serializablePeer struct {
-	MyID uint64
+	MyID string
 	Err  string
 }
 
-func (p serializablePeer) id() uint64 { return p.MyID }
+func (p serializablePeer) id() string { return p.MyID }
 func (p serializablePeer) callAppendEntries(appendEntries) appendEntriesResponse {
 	return appendEntriesResponse{}
 }

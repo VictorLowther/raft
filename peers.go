@@ -13,7 +13,7 @@ var (
 // be backed by any concrete transport: local, HTTP, net/rpc, etc. Peers must be
 // encoding/gob encodable.
 type Peer interface {
-	id() uint64
+	id() string
 	callAppendEntries(appendEntries) appendEntriesResponse
 	callRequestVote(requestVote) requestVoteResponse
 	callCommand([]byte, chan<- []byte) error
@@ -29,7 +29,7 @@ type localPeer struct {
 
 func newLocalPeer(server *Server) *localPeer { return &localPeer{server} }
 
-func (p *localPeer) id() uint64 { return p.server.id }
+func (p *localPeer) id() string { return p.server.id }
 
 func (p *localPeer) callAppendEntries(ae appendEntries) appendEntriesResponse {
 	return p.server.appendEntries(ae)
@@ -63,7 +63,7 @@ func requestVoteTimeout(p Peer, rv requestVote, timeout time.Duration) (requestV
 
 // peerMap is a collection of Peer interfaces. It provides some convenience
 // functions for actions that should apply to multiple Peers.
-type peerMap map[uint64]Peer
+type peerMap map[string]Peer
 
 // makePeerMap constructs a peerMap from a list of peers.
 func makePeerMap(peers ...Peer) peerMap {
@@ -83,7 +83,7 @@ func explodePeerMap(pm peerMap) []Peer {
 	return a
 }
 
-func (pm peerMap) except(id uint64) peerMap {
+func (pm peerMap) except(id string) peerMap {
 	except := peerMap{}
 	for id0, peer := range pm {
 		if id0 == id {
@@ -135,7 +135,7 @@ func (pm peerMap) requestVotes(r requestVote) (chan voteResponseTuple, canceler)
 			// scatter
 			tupleChan0 := make(chan voteResponseTuple, len(notYetResponded))
 			for id, peer := range notYetResponded {
-				go func(id uint64, peer Peer) {
+				go func(id string, peer Peer) {
 					resp, err := requestVoteTimeout(peer, r, 2*maximumElectionTimeout())
 					tupleChan0 <- voteResponseTuple{id, resp, err}
 				}(id, peer)
@@ -162,7 +162,7 @@ func (pm peerMap) requestVotes(r requestVote) (chan voteResponseTuple, canceler)
 }
 
 type voteResponseTuple struct {
-	id  uint64
+	id  string
 	rvr requestVoteResponse
 	err error
 }

@@ -13,6 +13,7 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+	"strconv"
 )
 
 func init() {
@@ -26,11 +27,11 @@ func TestFollowerToCandidate(t *testing.T) {
 	oldMin, oldMax := resetElectionTimeoutMs(25, 50)
 	defer resetElectionTimeoutMs(oldMin, oldMax)
 
-	server := NewServer(1, &bytes.Buffer{}, noop)
+	server := NewServer("foo", &bytes.Buffer{}, noop)
 	server.SetConfiguration(
 		newLocalPeer(server),
-		nonresponsivePeer(2),
-		nonresponsivePeer(3),
+		nonresponsivePeer("bar"),
+		nonresponsivePeer("baz"),
 	)
 
 	server.Start()
@@ -63,11 +64,11 @@ func TestCandidateToLeader(t *testing.T) {
 	oldMin, oldMax := resetElectionTimeoutMs(25, 50)
 	defer resetElectionTimeoutMs(oldMin, oldMax)
 
-	server := NewServer(1, &bytes.Buffer{}, noop)
+	server := NewServer("foo", &bytes.Buffer{}, noop)
 	server.SetConfiguration(
 		newLocalPeer(server),
-		approvingPeer(2),
-		nonresponsivePeer(3),
+		approvingPeer("bar"),
+		nonresponsivePeer("baz"),
 	)
 
 	server.Start()
@@ -96,11 +97,11 @@ func TestFailedElection(t *testing.T) {
 	oldMin, oldMax := resetElectionTimeoutMs(25, 50)
 	defer resetElectionTimeoutMs(oldMin, oldMax)
 
-	server := NewServer(1, &bytes.Buffer{}, noop)
+	server := NewServer("foo", &bytes.Buffer{}, noop)
 	server.SetConfiguration(
 		newLocalPeer(server),
-		disapprovingPeer(2),
-		nonresponsivePeer(3),
+		disapprovingPeer("bar"),
+		nonresponsivePeer("baz"),
 	)
 
 	server.Start()
@@ -149,9 +150,9 @@ func TestSimpleConsensus(t *testing.T) {
 		}
 	}
 
-	s1 := NewServer(1, &bytes.Buffer{}, applyValue(1, &i1))
-	s2 := NewServer(2, &bytes.Buffer{}, applyValue(2, &i2))
-	s3 := NewServer(3, &bytes.Buffer{}, applyValue(3, &i3))
+	s1 := NewServer("foo", &bytes.Buffer{}, applyValue(1, &i1))
+	s2 := NewServer("bar", &bytes.Buffer{}, applyValue(2, &i2))
+	s3 := NewServer("baz", &bytes.Buffer{}, applyValue(3, &i3))
 
 	s1Responses := &synchronizedBuffer{}
 	s2Responses := &synchronizedBuffer{}
@@ -288,7 +289,7 @@ func testOrder(t *testing.T, nServers int) {
 	for i := 0; i < nServers; i++ {
 		buffers = append(buffers, &synchronizedBuffer{})
 		storage = append(storage, &bytes.Buffer{})
-		servers = append(servers, NewServer(uint64(i+1), storage[i], do(buffers[i])))
+		servers = append(servers, NewServer(strconv.Itoa(i), storage[i], do(buffers[i])))
 	}
 	peers := []Peer{}
 	for _, server := range servers {
@@ -315,7 +316,7 @@ func testOrder(t *testing.T, nServers int) {
 	for _, server := range servers {
 		server.Start()
 		defer func(server *Server) {
-			log.Printf("issuing stop command to server %d", server.id)
+			log.Printf("issuing stop command to server %s", server.id)
 			server.Stop()
 		}(server)
 	}
@@ -328,35 +329,35 @@ func testOrder(t *testing.T, nServers int) {
 		buf, _ := json.Marshal(cmd)
 
 		for {
-			log.Printf("command=%d/%d peer=%d: sending %s", i+1, len(cmds), id, buf)
+			log.Printf("command=%d/%d peer=%s: sending %s", i+1, len(cmds), id, buf)
 			response := make(chan []byte, 1)
 			err := peer.callCommand(buf, response)
 
 			switch err {
 			case nil:
-				log.Printf("command=%d/%d peer=%d: OK", i+1, len(cmds), id)
+				log.Printf("command=%d/%d peer=%s: OK", i+1, len(cmds), id)
 				break
 
 			case errUnknownLeader, errDeposed:
-				log.Printf("command=%d/%d peer=%d: failed (%s) -- will retry", i+1, len(cmds), id, err)
+				log.Printf("command=%d/%d peer=%s: failed (%s) -- will retry", i+1, len(cmds), id, err)
 				time.Sleep(electionTimeout())
 				continue
 
 			case errTimeout:
-				log.Printf("command=%d/%d peer=%d: timed out -- assume it went through", i+1, len(cmds), id)
+				log.Printf("command=%d/%d peer=%s: timed out -- assume it went through", i+1, len(cmds), id)
 				break
 
 			default:
-				t.Fatalf("command=%d/%d peer=%d: failed (%s) -- fatal", i+1, len(cmds), id, err)
+				t.Fatalf("command=%d/%d peer=%s: failed (%s) -- fatal", i+1, len(cmds), id, err)
 			}
 
 			r, ok := <-response
 			if !ok {
-				log.Printf("command=%d/%d peer=%d: truncated, will retry", i+1, len(cmds), id)
+				log.Printf("command=%d/%d peer=%s: truncated, will retry", i+1, len(cmds), id)
 				continue
 			}
 
-			log.Printf("command=%d/%d peer=%d: OK, got response %s", i+1, len(cmds), id, string(r))
+			log.Printf("command=%d/%d peer=%s: OK, got response %s", i+1, len(cmds), id, string(r))
 			break
 		}
 	}
@@ -369,15 +370,15 @@ func testOrder(t *testing.T, nServers int) {
 		for {
 			expected, got := expectedBuffer.String(), sb.String()
 			if len(got) < len(expected) {
-				t.Logf("server %d: not yet fully replicated, will check again", i+1)
+				t.Logf("server %d: not yet fully replicated, will check again", i)
 				time.Sleep(maximumElectionTimeout())
 				continue // retry
 			}
 			if expected != got {
-				t.Errorf("server %d: fully replicated, expected\n\t%s, got\n\t%s", i+1, expected, got)
+				t.Errorf("server %d: fully replicated, expected\n\t%s, got\n\t%s", i, expected, got)
 				break
 			}
-			t.Logf("server %d: %s OK", i+1, got)
+			t.Logf("server %d: %s OK", i, got)
 			break
 		}
 	}
@@ -418,9 +419,9 @@ func (b *synchronizedBuffer) String() string {
 	return b.buf.String()
 }
 
-type nonresponsivePeer uint64
+type nonresponsivePeer string
 
-func (p nonresponsivePeer) id() uint64 { return uint64(p) }
+func (p nonresponsivePeer) id() string { return string(p) }
 func (p nonresponsivePeer) callAppendEntries(appendEntries) appendEntriesResponse {
 	return appendEntriesResponse{}
 }
@@ -434,9 +435,9 @@ func (p nonresponsivePeer) callSetConfiguration(...Peer) error {
 	return fmt.Errorf("not implemented")
 }
 
-type approvingPeer uint64
+type approvingPeer string
 
-func (p approvingPeer) id() uint64 { return uint64(p) }
+func (p approvingPeer) id() string { return string(p) }
 func (p approvingPeer) callAppendEntries(appendEntries) appendEntriesResponse {
 	return appendEntriesResponse{}
 }
@@ -453,9 +454,9 @@ func (p approvingPeer) callSetConfiguration(...Peer) error {
 	return fmt.Errorf("not implemented")
 }
 
-type disapprovingPeer uint64
+type disapprovingPeer string
 
-func (p disapprovingPeer) id() uint64 { return uint64(p) }
+func (p disapprovingPeer) id() string { return string(p) }
 func (p disapprovingPeer) callAppendEntries(appendEntries) appendEntriesResponse {
 	return appendEntriesResponse{}
 }

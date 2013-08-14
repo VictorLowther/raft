@@ -22,8 +22,8 @@ const (
 )
 
 const (
-	unknownLeader = 0
-	noVote        = 0
+	unknownLeader = ""
+	noVote        = ""
 )
 
 var (
@@ -122,12 +122,12 @@ func (s *protectedBool) Set(value bool) {
 // In a typical application, each running process that wants to be part of
 // the distributed state machine will contain a server component.
 type Server struct {
-	id      uint64 // id of this server
+	id      string // id of this server
 	state   *protectedString
 	running *protectedBool
-	leader  uint64 // who we believe is the leader
+	leader  string // who we believe is the leader
 	term    uint64 // "current term number, which increases monotonically"
-	vote    uint64 // who we voted for this term, if applicable
+	vote    string // who we voted for this term, if applicable
 	log     *raftLog
 	config  *configuration
 
@@ -159,9 +159,9 @@ type ApplyFunc func(commitIndex uint64, cmd []byte) []byte
 //
 // NewServer creates a server, but you'll need to couple it with a transport to
 // make it usable. See the example(s) for usage scenarios.
-func NewServer(id uint64, store io.ReadWriter, a ApplyFunc) *Server {
-	if id <= 0 {
-		panic("server id must be > 0")
+func NewServer(id string, store io.ReadWriter, a ApplyFunc) *Server {
+	if len(id) == 0 {
+		panic("server id must not be empty!")
 	}
 
 	// 5.2 Leader election: "the latest term this server has seen is persisted,
@@ -300,13 +300,13 @@ func (s *Server) resetElectionTimeout() {
 }
 
 func (s *Server) logGeneric(format string, args ...interface{}) {
-	prefix := fmt.Sprintf("id=%d term=%d state=%s: ", s.id, s.term, s.state.Get())
+	prefix := fmt.Sprintf("id=%s term=%d state=%s: ", s.id, s.term, s.state.Get())
 	log.Printf(prefix+format, args...)
 }
 
 func (s *Server) logappendEntriesResponse(req appendEntries, resp appendEntriesResponse, stepDown bool) {
 	s.logGeneric(
-		"got appendEntries, sz=%d leader=%d prevIndex/Term=%d/%d commitIndex=%d: responded with success=%v (reason='%s') stepDown=%v",
+		"got appendEntries, sz=%d leader=%s prevIndex/Term=%d/%d commitIndex=%d: responded with success=%v (reason='%s') stepDown=%v",
 		len(req.Entries),
 		req.LeaderID,
 		req.PrevLogIndex,
@@ -319,7 +319,7 @@ func (s *Server) logappendEntriesResponse(req appendEntries, resp appendEntriesR
 }
 func (s *Server) logRequestVoteResponse(req requestVote, resp requestVoteResponse, stepDown bool) {
 	s.logGeneric(
-		"got RequestVote, candidate=%d: responded with granted=%v (reason='%s') stepDown=%v",
+		"got RequestVote, candidate=%s: responded with granted=%v (reason='%s') stepDown=%v",
 		req.CandidateID,
 		resp.VoteGranted,
 		resp.reason,
@@ -347,7 +347,7 @@ func (s *Server) forwardCommand(t commandTuple) {
 		if !ok {
 			panic("invalid state in peers")
 		}
-		s.logGeneric("got command, forwarding to leader (%d)", s.leader)
+		s.logGeneric("got command, forwarding to leader (%s)", s.leader)
 		// We're blocking our {follower,candidate}Select function in the
 		// receive-command branch. If we continue to block while forwarding
 		// the command, the leader won't be able to get a response from us!
@@ -369,7 +369,7 @@ func (s *Server) forwardConfiguration(t configurationTuple) {
 		if !ok {
 			panic("invalid state in peers")
 		}
-		s.logGeneric("got configuration, forwarding to leader (%d)", s.leader)
+		s.logGeneric("got configuration, forwarding to leader (%s)", s.leader)
 		go func() { t.Err <- leader.callSetConfiguration(t.Peers...) }()
 	}
 }
@@ -406,7 +406,7 @@ func (s *Server) followerSelect() {
 		case t := <-s.appendEntriesChan:
 			if s.leader == unknownLeader {
 				s.leader = t.Request.LeaderID
-				s.logGeneric("discovered Leader %d", s.leader)
+				s.logGeneric("discovered Leader %s", s.leader)
 			}
 			resp, stepDown := s.handleAppendEntries(t.Request)
 			s.logappendEntriesResponse(t.Request, resp, stepDown)
@@ -414,9 +414,9 @@ func (s *Server) followerSelect() {
 			if stepDown {
 				// stepDown as a Follower means just to reset the leader
 				if s.leader != unknownLeader {
-					s.logGeneric("abandoning old leader=%d", s.leader)
+					s.logGeneric("abandoning old leader=%s", s.leader)
 				}
-				s.logGeneric("following new leader=%d", t.Request.LeaderID)
+				s.logGeneric("following new leader=%s", t.Request.LeaderID)
 				s.leader = t.Request.LeaderID
 			}
 
@@ -427,7 +427,7 @@ func (s *Server) followerSelect() {
 			if stepDown {
 				// stepDown as a Follower means just to reset the leader
 				if s.leader != unknownLeader {
-					s.logGeneric("abandoning old leader=%d", s.leader)
+					s.logGeneric("abandoning old leader=%s", s.leader)
 				}
 				s.logGeneric("new leader unknown")
 				s.leader = unknownLeader
@@ -440,7 +440,7 @@ func (s *Server) candidateSelect() {
 	if s.leader != unknownLeader {
 		panic("known leader when entering candidateSelect")
 	}
-	if s.vote != 0 {
+	if s.vote != noVote {
 		panic("existing vote when entering candidateSelect")
 	}
 
@@ -458,7 +458,7 @@ func (s *Server) candidateSelect() {
 	defer canceler.Cancel()
 
 	// Set up vote tallies (plus, vote for myself)
-	votes := map[uint64]bool{s.id: true}
+	votes := map[string]bool{s.id: true}
 	s.vote = s.id
 	s.logGeneric("term=%d election started (configuration state %s)", s.term, s.config.state)
 
@@ -487,7 +487,7 @@ func (s *Server) candidateSelect() {
 			s.forwardConfiguration(t)
 
 		case t := <-tuples:
-			s.logGeneric("got vote: id=%d term=%d granted=%v", t.id, t.rvr.Term, t.rvr.VoteGranted)
+			s.logGeneric("got vote: id=%s term=%d granted=%v", t.id, t.rvr.Term, t.rvr.VoteGranted)
 			// "A candidate wins the election if it receives votes from a
 			// majority of servers in the full cluster for the same term."
 			if t.rvr.Term > s.term {
@@ -502,7 +502,7 @@ func (s *Server) candidateSelect() {
 				break
 			}
 			if t.rvr.VoteGranted {
-				s.logGeneric("%d voted for me", t.id)
+				s.logGeneric("%s voted for me", t.id)
 				votes[t.id] = true
 			}
 			// "Once a candidate wins an election, it becomes leader."
@@ -525,7 +525,7 @@ func (s *Server) candidateSelect() {
 			s.logappendEntriesResponse(t.Request, resp, stepDown)
 			t.Response <- resp
 			if stepDown {
-				s.logGeneric("after an appendEntries, stepping down to Follower (leader=%d)", t.Request.LeaderID)
+				s.logGeneric("after an appendEntries, stepping down to Follower (leader=%s)", t.Request.LeaderID)
 				s.leader = t.Request.LeaderID
 				s.state.Set(follower)
 				return // lose
@@ -565,12 +565,12 @@ func (s *Server) candidateSelect() {
 
 type nextIndex struct {
 	sync.RWMutex
-	m map[uint64]uint64 // followerId: nextIndex
+	m map[string]uint64 // followerId: nextIndex
 }
 
 func newNextIndex(pm peerMap, defaultNextIndex uint64) *nextIndex {
 	ni := &nextIndex{
-		m: map[uint64]uint64{},
+		m: map[string]uint64{},
 	}
 	for id := range pm {
 		ni.m[id] = defaultNextIndex
@@ -595,22 +595,22 @@ func (ni *nextIndex) bestIndex() uint64 {
 	return i
 }
 
-func (ni *nextIndex) prevLogIndex(id uint64) uint64 {
+func (ni *nextIndex) prevLogIndex(id string) uint64 {
 	ni.RLock()
 	defer ni.RUnlock()
 	if _, ok := ni.m[id]; !ok {
-		panic(fmt.Sprintf("peer %d not found", id))
+		panic(fmt.Sprintf("peer %s not found", id))
 	}
 	return ni.m[id]
 }
 
-func (ni *nextIndex) decrement(id uint64, prev uint64) (uint64, error) {
+func (ni *nextIndex) decrement(id string, prev uint64) (uint64, error) {
 	ni.Lock()
 	defer ni.Unlock()
 
 	i, ok := ni.m[id]
 	if !ok {
-		panic(fmt.Sprintf("peer %d not found", id))
+		panic(fmt.Sprintf("peer %s not found", id))
 	}
 
 	if i != prev {
@@ -623,13 +623,13 @@ func (ni *nextIndex) decrement(id uint64, prev uint64) (uint64, error) {
 	return ni.m[id], nil
 }
 
-func (ni *nextIndex) set(id, index, prev uint64) (uint64, error) {
+func (ni *nextIndex) set(id string, index, prev uint64) (uint64, error) {
 	ni.Lock()
 	defer ni.Unlock()
 
 	i, ok := ni.m[id]
 	if !ok {
-		panic(fmt.Sprintf("peer %d not found", id))
+		panic(fmt.Sprintf("peer %s not found", id))
 	}
 	if i != prev {
 		return i, errOutOfSync
@@ -654,7 +654,7 @@ func (s *Server) flush(peer Peer, ni *nextIndex) error {
 	prevLogIndex := ni.prevLogIndex(peerID)
 	entries, prevLogTerm := s.log.entriesAfter(prevLogIndex)
 	commitIndex := s.log.getCommitIndex()
-	s.logGeneric("flush to %d: term=%d leaderId=%d prevLogIndex/Term=%d/%d sz=%d commitIndex=%d", peerID, currentTerm, s.id, prevLogIndex, prevLogTerm, len(entries), commitIndex)
+	s.logGeneric("flush to %s: term=%d leaderId=%s prevLogIndex/Term=%d/%d sz=%d commitIndex=%d", peerID, currentTerm, s.id, prevLogIndex, prevLogTerm, len(entries), commitIndex)
 	resp := peer.callAppendEntries(appendEntries{
 		Term:         currentTerm,
 		LeaderID:     s.id,
@@ -665,7 +665,7 @@ func (s *Server) flush(peer Peer, ni *nextIndex) error {
 	})
 
 	if resp.Term > currentTerm {
-		s.logGeneric("flush to %d: responseTerm=%d > currentTerm=%d: deposed", peerID, resp.Term, currentTerm)
+		s.logGeneric("flush to %s: responseTerm=%d > currentTerm=%d: deposed", peerID, resp.Term, currentTerm)
 		return errDeposed
 	}
 
@@ -675,24 +675,24 @@ func (s *Server) flush(peer Peer, ni *nextIndex) error {
 	if !resp.Success {
 		newPrevLogIndex, err := ni.decrement(peerID, prevLogIndex)
 		if err != nil {
-			s.logGeneric("flush to %d: while decrementing prevLogIndex: %s", peerID, err)
+			s.logGeneric("flush to %s: while decrementing prevLogIndex: %s", peerID, err)
 			return err
 		}
-		s.logGeneric("flush to %d: rejected; prevLogIndex(%d) becomes %d", peerID, peerID, newPrevLogIndex)
+		s.logGeneric("flush to %s: rejected; prevLogIndex(%s) becomes %d", peerID, peerID, newPrevLogIndex)
 		return errappendEntriesRejected
 	}
 
 	if len(entries) > 0 {
 		newPrevLogIndex, err := ni.set(peer.id(), entries[len(entries)-1].Index, prevLogIndex)
 		if err != nil {
-			s.logGeneric("flush to %d: while moving prevLogIndex forward: %s", peerID, err)
+			s.logGeneric("flush to %s: while moving prevLogIndex forward: %s", peerID, err)
 			return err
 		}
-		s.logGeneric("flush to %d: accepted; prevLogIndex(%d) becomes %d", peerID, peerID, newPrevLogIndex)
+		s.logGeneric("flush to %s: accepted; prevLogIndex(%s) becomes %d", peerID, peerID, newPrevLogIndex)
 		return nil
 	}
 
-	s.logGeneric("flush to %d: accepted; prevLogIndex(%d) remains %d", peerID, peerID, ni.prevLogIndex(peerID))
+	s.logGeneric("flush to %s: accepted; prevLogIndex(%s) remains %d", peerID, peerID, ni.prevLogIndex(peerID))
 	return nil
 }
 
@@ -701,7 +701,7 @@ func (s *Server) flush(peer Peer, ni *nextIndex) error {
 // peer.
 func (s *Server) concurrentFlush(pm peerMap, ni *nextIndex, timeout time.Duration) (int, bool) {
 	type tuple struct {
-		id  uint64
+		id  string
 		err error
 	}
 	responses := make(chan tuple, len(pm))
@@ -718,13 +718,13 @@ func (s *Server) concurrentFlush(pm peerMap, ni *nextIndex, timeout time.Duratio
 	for i := 0; i < cap(responses); i++ {
 		switch t := <-responses; t.err {
 		case nil:
-			s.logGeneric("concurrentFlush: peer %d: OK (prevLogIndex(%d)=%d)", t.id, t.id, ni.prevLogIndex(t.id))
+			s.logGeneric("concurrentFlush: peer %s: OK (prevLogIndex(%s)=%d)", t.id, t.id, ni.prevLogIndex(t.id))
 			successes++
 		case errDeposed:
-			s.logGeneric("concurrentFlush: peer %d: deposed!", t.id)
+			s.logGeneric("concurrentFlush: peer %s: deposed!", t.id)
 			stepDown = true
 		default:
-			s.logGeneric("concurrentFlush: peer %d: %s (prevLogIndex(%d)=%d)", t.id, t.err, t.id, ni.prevLogIndex(t.id))
+			s.logGeneric("concurrentFlush: peer %d: %s (prevLogIndex(%s)=%d)", t.id, t.err, t.id, ni.prevLogIndex(t.id))
 			// nothing to do but log and continue
 		}
 	}
@@ -735,7 +735,7 @@ func (s *Server) leaderSelect() {
 	if s.leader != s.id {
 		panic(fmt.Sprintf("leader (%d) not me (%d) when entering leaderSelect", s.leader, s.id))
 	}
-	if s.vote != 0 {
+	if s.vote != noVote {
 		panic(fmt.Sprintf("vote (%d) not zero when entering leaderSelect", s.leader, s.id))
 	}
 
@@ -954,7 +954,7 @@ func (s *Server) handleRequestVote(rv requestVote) (requestVoteResponse, bool) {
 	}
 
 	// If we've already voted for someone else this term, reject
-	if s.vote != 0 && s.vote != rv.CandidateID {
+	if s.vote != noVote && s.vote != rv.CandidateID {
 		if stepDown {
 			panic("impossible state in handleRequestVote")
 		}

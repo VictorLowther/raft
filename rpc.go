@@ -12,8 +12,8 @@ type requestVoteTuple struct {
 
 // appendEntries represents an appendEntries RPC.
 type appendEntries struct {
+	LeaderID     string     `json:"leader_id"`
 	Term         uint64     `json:"term"`
-	LeaderID     uint64     `json:"leader_id"`
 	PrevLogIndex uint64     `json:"prev_log_index"`
 	PrevLogTerm  uint64     `json:"prev_log_term"`
 	Entries      []logEntry `json:"entries"`
@@ -29,8 +29,8 @@ type appendEntriesResponse struct {
 
 // requestVote represents a requestVote RPC.
 type requestVote struct {
+	CandidateID  string `json:"candidate_id"`
 	Term         uint64 `json:"term"`
-	CandidateID  uint64 `json:"candidate_id"`
 	LastLogIndex uint64 `json:"last_log_index"`
 	LastLogTerm  uint64 `json:"last_log_term"`
 }

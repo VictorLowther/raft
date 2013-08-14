@@ -32,7 +32,7 @@ func ExampleNewServer_hTTP() {
 	}
 
 	// Construct the server
-	s := raft.NewServer(1, &bytes.Buffer{}, a)
+	s := raft.NewServer("foo", &bytes.Buffer{}, a)
 
 	// Expose the server using a HTTP transport
 	raft.HTTPTransport(http.DefaultServeMux, s)
@@ -56,7 +56,7 @@ func ExampleServer_Command() {
 	ponger := func(uint64, []byte) []byte { return []byte(`PONG`) }
 
 	// Assuming you have a server started
-	s := raft.NewServer(1, &bytes.Buffer{}, ponger)
+	s := raft.NewServer("foo", &bytes.Buffer{}, ponger)
 
 	// Issue a command into the network
 	response := make(chan []byte)
