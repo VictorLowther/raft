@@ -3,6 +3,8 @@ package raft
 import (
 	"errors"
 	"time"
+	"net/url"
+	"log"
 )
 
 var (
@@ -13,11 +15,24 @@ var (
 // be backed by any concrete transport: local, HTTP, net/rpc, etc. Peers must be
 // encoding/gob encodable.
 type Peer interface {
-	id() string
+	id() string // The ID of the peer.
+	url() string // The URL that can be used to construct a new Transport for this Peer.
 	callAppendEntries(appendEntries) appendEntriesResponse
 	callRequestVote(requestVote) requestVoteResponse
 	callCommand([]byte, chan<- []byte) error
 	callSetConfiguration(...Peer) error
+	callConfiguration(chan <-[]string) error
+}
+
+// MakePeer makes a new peer out of a passed URL.
+// It currently only knows how to handle HTTP transport based peers.
+func MakePeer(url *url.URL) (peer Peer, err error) {
+	switch url.Scheme {
+	case "https": fallthrough
+	case "http": peer,err = NewHTTPPeer(url)
+	default: log.Fatalf("Cannot reconstitute a peer from %s",url.String())
+	}
+	return peer,err
 }
 
 // localPeer is the simplest kind of peer, mapped to a server in the
@@ -30,6 +45,8 @@ type localPeer struct {
 func newLocalPeer(server *Server) *localPeer { return &localPeer{server} }
 
 func (p *localPeer) id() string { return p.server.id }
+
+func (p *localPeer) url() string { return "local://" }
 
 func (p *localPeer) callAppendEntries(ae appendEntries) appendEntriesResponse {
 	return p.server.appendEntries(ae)
@@ -45,6 +62,11 @@ func (p *localPeer) callCommand(cmd []byte, response chan<- []byte) error {
 
 func (p *localPeer) callSetConfiguration(peers ...Peer) error {
 	return p.server.SetConfiguration(peers...)
+}
+
+func (p *localPeer) callConfiguration(c chan <-[]string) error {
+	go func() { c <- p.server.Configuration() }()
+	return nil
 }
 
 // requestVoteTimeout issues the requestVote to the given peer.

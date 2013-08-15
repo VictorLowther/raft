@@ -42,7 +42,6 @@ func newConfiguration(pm peerMap) *configuration {
 func (c *configuration) directSet(pm peerMap) error {
 	c.Lock()
 	defer c.Unlock()
-
 	c.cOldPeers = pm
 	c.cNewPeers = peerMap{}
 	c.state = cOld
@@ -83,6 +82,13 @@ func (c *configuration) allPeers() peerMap {
 		union[id] = peer
 	}
 	return union
+}
+func (c *configuration) peerEndpoints() []string {
+	peers := make([]string,0,len(c.cOldPeers))
+	for _,peer := range c.allPeers() {
+		peers = append(peers,peer.url())
+	}
+	return peers
 }
 
 // pass returns true if the votes represented by the votes map are sufficient
@@ -167,7 +173,6 @@ func (c *configuration) changeCommitted() {
 	if len(c.cNewPeers) <= 0 {
 		panic("configuration ChangeCommitted, but C_new peers are empty")
 	}
-
 	c.cOldPeers = c.cNewPeers
 	c.cNewPeers = peerMap{}
 	c.state = cOld
@@ -185,3 +190,5 @@ func (c *configuration) changeAborted() {
 	c.cNewPeers = peerMap{}
 	c.state = cOld
 }
+
+

@@ -422,6 +422,7 @@ func (b *synchronizedBuffer) String() string {
 type nonresponsivePeer string
 
 func (p nonresponsivePeer) id() string { return string(p) }
+func (p nonresponsivePeer) url() string { return "test://nonresp/" + p.id() }
 func (p nonresponsivePeer) callAppendEntries(appendEntries) appendEntriesResponse {
 	return appendEntriesResponse{}
 }
@@ -434,10 +435,14 @@ func (p nonresponsivePeer) callCommand([]byte, chan<- []byte) error {
 func (p nonresponsivePeer) callSetConfiguration(...Peer) error {
 	return fmt.Errorf("not implemented")
 }
+func (p nonresponsivePeer) callConfiguration(c chan <- []string) error {
+	return fmt.Errorf("not implemented")
+}
 
 type approvingPeer string
 
 func (p approvingPeer) id() string { return string(p) }
+func (p approvingPeer) url() string { return "test://approve/" + p.id() }
 func (p approvingPeer) callAppendEntries(appendEntries) appendEntriesResponse {
 	return appendEntriesResponse{}
 }
@@ -453,10 +458,14 @@ func (p approvingPeer) callCommand([]byte, chan<- []byte) error {
 func (p approvingPeer) callSetConfiguration(...Peer) error {
 	return fmt.Errorf("not implemented")
 }
+func (p approvingPeer) callConfiguration(c chan <- []string) error {
+	return fmt.Errorf("not implemented")
+}
 
 type disapprovingPeer string
 
 func (p disapprovingPeer) id() string { return string(p) }
+func (p disapprovingPeer) url() string { return "test://hater/" + p.id() }
 func (p disapprovingPeer) callAppendEntries(appendEntries) appendEntriesResponse {
 	return appendEntriesResponse{}
 }
@@ -470,5 +479,8 @@ func (p disapprovingPeer) callCommand([]byte, chan<- []byte) error {
 	return fmt.Errorf("not implemented")
 }
 func (p disapprovingPeer) callSetConfiguration(...Peer) error {
+	return fmt.Errorf("not implemented")
+}
+func (p disapprovingPeer) callConfiguration(c chan <- []string) error {
 	return fmt.Errorf("not implemented")
 }

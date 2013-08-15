@@ -32,6 +32,10 @@ var (
 	// SetConfigurationPath is where the SetConfiguration RPC handler (POST)
 	// will be installed by the HTTPTransport.
 	SetConfigurationPath = "/raft/setconfiguration"
+
+	// ConfigurationPath is where the Configuation RPC handler (GET) will be
+	// installed by the HTTP transport.
+	ConfigurationPath = "/raft/configurtion"
 )
 
 var (
@@ -53,6 +57,7 @@ func HTTPTransport(mux *http.ServeMux, s *Server) {
 	mux.HandleFunc(RequestVotePath, requestVoteHandler(s))
 	mux.HandleFunc(CommandPath, commandHandler(s))
 	mux.HandleFunc(SetConfigurationPath, setConfigurationHandler(s))
+	mux.HandleFunc(ConfigurationPath, configurationHandler(s))
 }
 
 func idHandler(s *Server) http.HandlerFunc {
@@ -148,6 +153,13 @@ func setConfigurationHandler(s *Server) http.HandlerFunc {
 	}
 }
 
+func configurationHandler(s *Server) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		respBuf,_ := json.Marshal(s.config.peerEndpoints())
+		w.Write(respBuf)
+	}
+}
+
 // commaError is the structure returned by the configuration handler, to clients
 // that make set-configuration requests over the HTTP Transport.
 type commaError struct {
@@ -159,7 +171,7 @@ type commaError struct {
 // remote server is expected to be accessible through an HTTPTransport.
 type httpPeer struct {
 	remoteID string
-	url      *url.URL
+	remoteUrl      *url.URL
 }
 
 // NewHTTPPeer constructs a new HTTP peer. Part of construction involves making
@@ -187,12 +199,14 @@ func NewHTTPPeer(url *url.URL) (Peer, error) {
 
 	return &httpPeer{
 		remoteID: string(id),
-		url:      url,
+		remoteUrl:      url,
 	}, nil
 }
 
 // ID returns the Raft-domain ID retrieved during construction of the httpPeer.
 func (p *httpPeer) id() string { return p.remoteID }
+
+func (p *httpPeer) url() string { return p.remoteUrl.String() }
 
 // AppendEntries triggers a AppendEntries RPC to the remote server, and
 // returns the response. Errors at the transport layers are logged, and
@@ -264,6 +278,24 @@ func (p *httpPeer) callCommand(cmd []byte, response chan<- []byte) error {
 	return <-errChan // TODO timeout?
 }
 
+// Configuration asks the remote server what the cluster peers are.
+func (p *httpPeer) callConfiguration(c chan <- []string) error {
+	var resp bytes.Buffer
+	if err := p.rpc(nil,ConfigurationPath,&resp); err != nil {
+		log.Printf("Raft: HTTP Peer: Configuration: during RPC: %s",err)
+		return err
+	}
+	dec := json.NewDecoder(&resp)
+	res := make([]string,0,0)
+	if err := dec.Decode(&res); err != nil {
+		log.Printf("Raft: HTTP Peer: Configuration: decode response: %s",err)
+		return err
+	}
+	go func() { c <- res }()
+	return nil
+}
+
+
 // SetConfiguration forwards the passed network configuration to the remote
 // server. Any error at the transport or application layer is returned
 // synchronously. If no error occurs, clients may assume the passed
@@ -293,8 +325,9 @@ func (p *httpPeer) callSetConfiguration(peers ...Peer) error {
 	return nil
 }
 
+
 func (p *httpPeer) rpc(request *bytes.Buffer, path string, response *bytes.Buffer) error {
-	url := *p.url
+	url := *p.remoteUrl
 	url.Path = path
 	resp, err := http.Post(url.String(), "application/json", request)
 	if err != nil {

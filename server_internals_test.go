@@ -242,6 +242,7 @@ type serializablePeer struct {
 }
 
 func (p serializablePeer) id() string { return p.MyID }
+func (p serializablePeer) url() string { return fmt.Sprintf("test://%s",p.MyID) }
 func (p serializablePeer) callAppendEntries(appendEntries) appendEntriesResponse {
 	return appendEntriesResponse{}
 }
@@ -252,5 +253,8 @@ func (p serializablePeer) callCommand([]byte, chan<- []byte) error {
 	return fmt.Errorf("%s", p.Err)
 }
 func (p serializablePeer) callSetConfiguration(...Peer) error {
+	return fmt.Errorf("%s", p.Err)
+}
+func (p serializablePeer) callConfiguration(c chan <- []string) error {
 	return fmt.Errorf("%s", p.Err)
 }

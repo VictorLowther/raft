@@ -134,6 +134,7 @@ type Server struct {
 	appendEntriesChan chan appendEntriesTuple
 	requestVoteChan   chan requestVoteTuple
 	commandChan       chan commandTuple
+	setConfigurationChan chan setConfigurationTuple
 	configurationChan chan configurationTuple
 
 	electionTick <-chan time.Time
@@ -161,7 +162,7 @@ type ApplyFunc func(commitIndex uint64, cmd []byte) []byte
 // make it usable. See the example(s) for usage scenarios.
 func NewServer(id string, store io.ReadWriter, a ApplyFunc) *Server {
 	if len(id) == 0 {
-		panic("server id must not be empty!")
+		log.Panic("server id must not be empty!")
 	}
 
 	// 5.2 Leader election: "the latest term this server has seen is persisted,
@@ -181,6 +182,7 @@ func NewServer(id string, store io.ReadWriter, a ApplyFunc) *Server {
 		appendEntriesChan: make(chan appendEntriesTuple),
 		requestVoteChan:   make(chan requestVoteTuple),
 		commandChan:       make(chan commandTuple),
+		setConfigurationChan: make(chan setConfigurationTuple),
 		configurationChan: make(chan configurationTuple),
 
 		electionTick: nil,
@@ -190,10 +192,32 @@ func NewServer(id string, store io.ReadWriter, a ApplyFunc) *Server {
 	return s
 }
 
-type configurationTuple struct {
+type tupleErrorer interface {
+	err() chan error
+}
+
+type setConfigurationTuple struct {
 	Peers []Peer
 	Err   chan error
 }
+
+func (t setConfigurationTuple) err() chan error { return t.Err }
+
+type configurationTuple struct {
+	Err chan error
+	Peers chan []string
+}
+
+func (t configurationTuple) err() chan error { return t.Err }
+
+type commandTuple struct {
+	Command         []byte
+	CommandResponse chan<- []byte
+	Err             chan error
+}
+
+func (t commandTuple) err() chan error { return t.Err }
+
 
 // SetConfiguration sets the peers that this server will attempt to communicate
 // with. The set peers should include a peer that represents this server.
@@ -207,8 +231,12 @@ func (s *Server) SetConfiguration(peers ...Peer) error {
 	}
 
 	err := make(chan error)
-	s.configurationChan <- configurationTuple{peers, err}
+	s.setConfigurationChan <- setConfigurationTuple{peers, err}
 	return <-err
+}
+
+func (s *Server) Configuration() []string {
+	return s.config.peerEndpoints()
 }
 
 // Start triggers the server to begin communicating with its peers.
@@ -222,12 +250,6 @@ func (s *Server) Stop() {
 	s.quit <- q
 	<-q
 	s.logGeneric("server stopped")
-}
-
-type commandTuple struct {
-	Command         []byte
-	CommandResponse chan<- []byte
-	Err             chan error
 }
 
 // Command appends the passed command to the leader log. If error is nil, the
@@ -290,7 +312,7 @@ func (s *Server) loop() {
 		case leader:
 			s.leaderSelect()
 		default:
-			panic(fmt.Sprintf("unknown Server State '%s'", state))
+			log.Panicf("unknown Server State '%s'", state)
 		}
 	}
 }
@@ -333,45 +355,44 @@ func (s *Server) handleQuit(q chan struct{}) {
 	close(q)
 }
 
-func (s *Server) forwardCommand(t commandTuple) {
+type forwardFunc func(Peer)
+
+func (s *Server) forwardToLeader(cmd string, t tupleErrorer, f forwardFunc) {
 	switch s.leader {
 	case unknownLeader:
-		s.logGeneric("got command, but don't know leader")
-		t.Err <- errUnknownLeader
+		s.logGeneric("got %s, but don't know leader",cmd)
+		t.err()  <- errUnknownLeader
 
 	case s.id: // I am the leader
-		panic("impossible state in forwardCommand")
+		log.Panicf("impossible state in forwardToLeader %s",cmd)
 
 	default:
 		leader, ok := s.config.get(s.leader)
 		if !ok {
-			panic("invalid state in peers")
+			log.Panic("invalid state in peers")
 		}
-		s.logGeneric("got command, forwarding to leader (%s)", s.leader)
+		s.logGeneric("got %s, forwarding to leader (%s)", cmd, s.leader)
 		// We're blocking our {follower,candidate}Select function in the
 		// receive-command branch. If we continue to block while forwarding
 		// the command, the leader won't be able to get a response from us!
-		go func() { t.Err <- leader.callCommand(t.Command, t.CommandResponse) }()
+
+		go f(leader)
 	}
 }
 
-func (s *Server) forwardConfiguration(t configurationTuple) {
-	switch s.leader {
-	case unknownLeader:
-		s.logGeneric("got configuration, but don't know leader")
-		t.Err <- errUnknownLeader
+func (s *Server) forwardCommand(t commandTuple) {
+	f := func(leader Peer) { t.Err <- leader.callCommand(t.Command, t.CommandResponse) }
+	s.forwardToLeader("command",t,f)
+}
 
-	case s.id: // I am the leader
-		panic("impossible state in forwardConfiguration")
+func (s *Server) forwardGetConfiguration(t configurationTuple)  {
+	f := func(leader Peer) { t.Err <- leader.callConfiguration(t.Peers) }
+	s.forwardToLeader("configuration",t,f)
+}
 
-	default:
-		leader, ok := s.config.get(s.leader)
-		if !ok {
-			panic("invalid state in peers")
-		}
-		s.logGeneric("got configuration, forwarding to leader (%s)", s.leader)
-		go func() { t.Err <- leader.callSetConfiguration(t.Peers...) }()
-	}
+func (s *Server) forwardConfiguration(t setConfigurationTuple) {
+	f := func(leader Peer) { t.Err <- leader.callSetConfiguration(t.Peers...) }
+	s.forwardToLeader("setConfiguration",t,f)
 }
 
 func (s *Server) followerSelect() {
@@ -384,8 +405,11 @@ func (s *Server) followerSelect() {
 		case t := <-s.commandChan:
 			s.forwardCommand(t)
 
-		case t := <-s.configurationChan:
+		case t := <-s.setConfigurationChan:
 			s.forwardConfiguration(t)
+
+		case t := <-s.configurationChan:
+			s.forwardGetConfiguration(t)
 
 		case <-s.electionTick:
 			// 5.2 Leader election: "A follower increments its current term and
@@ -483,8 +507,11 @@ func (s *Server) candidateSelect() {
 		case t := <-s.commandChan:
 			s.forwardCommand(t)
 
-		case t := <-s.configurationChan:
+		case t := <-s.setConfigurationChan:
 			s.forwardConfiguration(t)
+
+		case t := <-s.configurationChan:
+			s.forwardGetConfiguration(t)
 
 		case t := <-tuples:
 			s.logGeneric("got vote: id=%s term=%d granted=%v", t.id, t.rvr.Term, t.rvr.VoteGranted)
@@ -794,7 +821,7 @@ func (s *Server) leaderSelect() {
 			go func() { flush <- struct{}{} }()
 			t.Err <- nil
 
-		case t := <-s.configurationChan:
+		case t := <-s.setConfigurationChan:
 			// Attempt to change our local configuration
 			if err := s.config.changeTo(makePeerMap(t.Peers...)); err != nil {
 				t.Err <- err
@@ -835,6 +862,13 @@ func (s *Server) leaderSelect() {
 				t.Err <- err
 				continue
 			}
+		case t := <-s.configurationChan:
+			// Get the current configuration.
+			peers := make([]string,0,len(s.config.cOldPeers))
+			for _,peer := range s.config.allPeers() {
+				peers = append(peers,peer.url())
+			}
+			t.Peers <- peers
 
 		case <-flush:
 			// Flushes attempt to sync the follower log with ours.
